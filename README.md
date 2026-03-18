@@ -201,6 +201,10 @@ Getting bots to work on procedural maps is... an adventure. Here's what you need
 
 The Q3 .map format is just text -- three points per plane, texture name, UV params. The generator writes it directly, no intermediate format.
 
+## Inspiration
+
+This project was inspired by [quake-mapgen](https://gitlab.com/hemebond/quake-mapgen) by hemebond, a procedural map generator for Quake 1. That project demonstrated that seeded PRNG and simple grid-based room placement could produce surprisingly playable maps without any manual editing. q3mapgen adapts the idea for Quake III Arena, with Q3-specific brush formats, bot navigation (AAS), and multiple map styles.
+
 ## License
 
 MIT. Go make weird maps.
