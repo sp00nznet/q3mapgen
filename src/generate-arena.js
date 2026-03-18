@@ -1,24 +1,14 @@
 #!/usr/bin/env node
-// q3mapgen - Procedural arena map generator for Quake III Arena
-// Generates 7 map styles: dungeon, vertical, platform, ctf, tourney, atrium
-// Seeded PRNG means same seed = same map, every time.
-//
-// https://github.com/sp00nznet/q3mapgen
+// Procedural arena map generator for tilde
+// Generates two styles: enclosed dungeon rooms and q3dm17-style floating platforms
 
 const fs = require("fs");
 const path = require("path");
 
-// --- Configuration ---
-// Override with environment variables or edit these defaults
-const OUTPUT_DIR = process.env.ASSETS_DIR
-  ? path.join(process.env.ASSETS_DIR, "maps")
-  : path.join(__dirname, "..", "assets", "maps");
-const SCRIPT_DIR = process.env.ASSETS_DIR
-  ? path.join(process.env.ASSETS_DIR, "scripts")
-  : path.join(__dirname, "..", "assets", "scripts");
+const OUTPUT_DIR = process.env.ASSETS_DIR ? path.join(process.env.ASSETS_DIR, "maps") : path.join(__dirname, "..", "assets", "maps");
+const SCRIPT_DIR = process.env.ASSETS_DIR ? path.join(process.env.ASSETS_DIR, "scripts") : path.join(__dirname, "..", "assets", "scripts");
 
 // --- Seeded PRNG (Mulberry32) ---
-// Same seed = same map, every time. Deterministic chaos.
 function mulberry32(seed) {
   let s = seed | 0;
   return function () {
@@ -40,9 +30,7 @@ const CELL_SOLID = 0;
 const CELL_ROOM = 1;
 const CELL_CORRIDOR = 2;
 
-// --- Texture themes (Q3 demo pak0 textures) ---
-// You can add your own themes here — just follow the same structure.
-// Each theme needs walls[], floors[], ceilings[], trim, light, and sky.
+// --- Texture themes (authentic Q3 demo pak0 textures) ---
 const THEMES = [
   {
     name: "gothic",
@@ -62,7 +50,7 @@ const THEMES = [
     ],
     ceilings: [
       "gothic_ceiling/woodceiling1a",
-      "gothic_ceiling/ceilingtechplain",
+      "gothic_ceiling/ceilingtech02_c2",
       "gothic_ceiling/stucco7top",
     ],
     trim: "gothic_trim/baseboard09_1",
@@ -384,10 +372,10 @@ function placeEntities(platforms, rng, zOffset) {
     const axc = pA.x + Math.floor(pA.w / 2), ayc = pA.y + Math.floor(pA.h / 2);
     const bxc = pB.x + Math.floor(pB.w / 2), byc = pB.y + Math.floor(pB.h / 2);
 
-    // Teleporter A -> B
+    // Teleporter A → B
     const t1 = teleporterEntities(entNum, axc - 80, ayc, pA.z, bxc, byc, pB.z, 0);
     map += t1.map; entNum += t1.count;
-    // Teleporter B -> A
+    // Teleporter B → A
     const t2 = teleporterEntities(entNum, bxc + 80, byc, pB.z, axc, ayc, pA.z, 180);
     map += t2.map; entNum += t2.count;
   }
@@ -523,7 +511,7 @@ function dungeonToMap(grid, rooms, centers, theme, rng) {
     return roomTextures[bestRi];
   }
 
-  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "q3mapgen arena"\n`;
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde arena"\n`;
 
   const ox = -(GRID * CELL) / 2;
   const oy = -(GRID * CELL) / 2;
@@ -687,7 +675,7 @@ function verticalDungeonToMap(grid, rooms, centers, theme, rng) {
     return roomData[bestRi];
   }
 
-  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "q3mapgen arena"\n`;
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde arena"\n`;
 
   const ox = -(GRID * CELL) / 2;
   const oy = -(GRID * CELL) / 2;
@@ -735,6 +723,7 @@ function verticalDungeonToMap(grid, rooms, centers, theme, rng) {
       map += block(x1, y1, ceilZ, x2, y2, ceilZ + WALL_THICK, { bottom: tex.ceiling });
 
       // Walls — extend from lowest possible neighbor floor to ceiling
+      // Find lowest adjacent floor for wall base
       const adjFloors = [];
       if (gy > 0 && grid[gy-1][gx] !== CELL_SOLID) adjFloors.push(cellHeight(gy-1, gx));
       if (gy < GRID-1 && grid[gy+1][gx] !== CELL_SOLID) adjFloors.push(cellHeight(gy+1, gx));
@@ -761,11 +750,12 @@ function verticalDungeonToMap(grid, rooms, centers, theme, rng) {
 
       // Stairs where corridor cells transition between heights
       if (grid[gy][gx] === CELL_CORRIDOR) {
+        // Check neighbors for height difference — build stairs
         const neighbors = [
-          [gy - 1, gx, "y", y1],
-          [gy + 1, gx, "y", y2],
-          [gy, gx - 1, "x", x1],
-          [gy, gx + 1, "x", x2],
+          [gy - 1, gx, "y", y1],  // south neighbor
+          [gy + 1, gx, "y", y2],  // north neighbor
+          [gy, gx - 1, "x", x1],  // west neighbor
+          [gy, gx + 1, "x", x2],  // east neighbor
         ];
 
         for (const [ny, nx, axis, edge] of neighbors) {
@@ -774,16 +764,19 @@ function verticalDungeonToMap(grid, rooms, centers, theme, rng) {
 
           const neighborZ = cellHeight(ny, nx);
           const dz = neighborZ - floorZ;
-          if (Math.abs(dz) < STEP_SIZE) continue;
+          if (Math.abs(dz) < STEP_SIZE) continue; // same height, no stairs needed
 
           const numSteps = Math.abs(Math.round(dz / STEP_SIZE));
           const stepH = dz / numSteps;
+          const dir = dz > 0 ? 1 : -1;
 
           if (axis === "y") {
+            // Stairs along Y axis
             const stairDepth = CELL / numSteps;
             for (let s = 0; s < numSteps; s++) {
               const sz = floorZ + s * stepH;
               const nextZ = floorZ + (s + 1) * stepH;
+              const baseZ = Math.min(sz, nextZ);
               const topZ = Math.max(sz, nextZ);
               let sy1, sy2;
               if (dz > 0 === (ny > gy)) {
@@ -797,10 +790,12 @@ function verticalDungeonToMap(grid, rooms, centers, theme, rng) {
               map += block(x1, sy1, floorZ - 64, x2, sy2, topZ, { top: tex.floor, north: tex.wall, south: tex.wall, east: tex.wall, west: tex.wall });
             }
           } else {
+            // Stairs along X axis
             const stairDepth = CELL / numSteps;
             for (let s = 0; s < numSteps; s++) {
               const sz = floorZ + s * stepH;
               const nextZ = floorZ + (s + 1) * stepH;
+              const baseZ = Math.min(sz, nextZ);
               const topZ = Math.max(sz, nextZ);
               let sx1, sx2;
               if (dz > 0 === (nx > gx)) {
@@ -829,7 +824,7 @@ function verticalDungeonToMap(grid, rooms, centers, theme, rng) {
     const platH = Math.floor(r.h / 2) * CELL;
     const px = ox + (r.x + Math.floor((r.w - r.w / 2) / 2)) * CELL;
     const py = oy + (r.y + Math.floor((r.h - r.h / 2) / 2)) * CELL;
-    const platZ = tex.z + 128 + Math.floor(rng() * 2) * 64;
+    const platZ = tex.z + 128 + Math.floor(rng() * 2) * 64; // 128 or 192 above floor
 
     map += `// raised platform room ${ri}\n// brush ${brushNum++}\n`;
     map += block(px, py, platZ - 32, px + platW, py + platH, platZ, {
@@ -856,7 +851,7 @@ function verticalDungeonToMap(grid, rooms, centers, theme, rng) {
   map += "}\n"; // end worldspawn
   map += entMap;
 
-  // Kill trigger below lowest floor
+  // Kill trigger below lowest floor (catch anyone who clips through)
   let eNum = entNum;
   const killZ = -128;
   map += `// entity ${eNum++} - kill trigger\n{\n"classname" "trigger_hurt"\n"dmg" "1000"\n`;
@@ -943,7 +938,7 @@ function platformsToMap(platforms, theme, rng) {
   let map = "";
   let brushNum = 0;
 
-  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "q3mapgen arena"\n`;
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde arena"\n`;
 
   // Compute bounds
   let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -994,6 +989,7 @@ function platformsToMap(platforms, theme, rng) {
 
     // Optional railings/pillars on some platforms (25% chance)
     if (rng() < 0.25) {
+      // Corner pillars
       const pillarSize = 32;
       const pillarHeight = 96;
       const corners = [
@@ -1051,6 +1047,7 @@ function platformsToMap(platforms, theme, rng) {
     const a = platforms[from], b = platforms[to];
     const acx = a.x + a.w / 2, acy = a.y + a.h / 2;
     const bcx = b.x + b.w / 2, bcy = b.y + b.h / 2;
+    // Bridge at the LOWER platform height so you can walk onto it from both sides
     const bridgeZ = Math.min(a.z, b.z);
     const bTex = {
       top: platTextures[from].floor, bottom: platTextures[from].wall,
@@ -1059,14 +1056,17 @@ function platformsToMap(platforms, theme, rng) {
     };
     const hw = bridgeWidth / 2;
 
+    // L-shaped: horizontal segment then vertical segment
     const midX = bcx, midY = acy;
 
+    // Horizontal segment from platform A center to bend point
     const hx1 = Math.min(acx, midX), hx2 = Math.max(acx, midX);
     if (hx2 - hx1 > 16) {
       map += `// bridge ${from}-${to} horiz\n// brush ${brushNum++}\n`;
       map += block(hx1, acy - hw, bridgeZ - bridgeThick, hx2, acy + hw, bridgeZ, bTex);
     }
 
+    // Vertical segment from bend point to platform B center
     const vy1 = Math.min(acy, bcy), vy2 = Math.max(acy, bcy);
     if (vy2 - vy1 > 16) {
       map += `// bridge ${from}-${to} vert\n// brush ${brushNum++}\n`;
@@ -1100,6 +1100,8 @@ function platformsToMap(platforms, theme, rng) {
   return map;
 }
 
+// (arena file generation moved to after map style definitions)
+
 // =============================================
 // CTF STYLE (symmetric two-base map)
 // =============================================
@@ -1111,7 +1113,7 @@ function generateCTF(rng, theme) {
   const mapW = CELL * 8; // map width
   const hw = mapW / 2;
 
-  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "q3mapgen ctf"\n`;
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde ctf"\n`;
 
   // Sealing box
   const bx1 = -halfLen - CELL * 2, by1 = -hw - CELL * 2;
@@ -1127,11 +1129,18 @@ function generateCTF(rng, theme) {
   const floorTex2 = theme.floors[Math.floor(rng() * theme.floors.length)];
 
   // Build symmetric map: red base (-X) | middle | blue base (+X)
+  // Each section: flag room → corridor → middle arena
+
   const sections = [
+    // Red flag room
     { x1: -halfLen, y1: -CELL * 2, x2: -halfLen + CELL * 3, y2: CELL * 2, z: 0, ft: floorTex, wt: wallTex },
+    // Red approach corridor
     { x1: -halfLen + CELL * 3, y1: -CELL, x2: -CELL * 2, y2: CELL, z: 0, ft: floorTex2, wt: wallTex2 },
+    // Middle arena (large open area)
     { x1: -CELL * 2, y1: -hw, x2: CELL * 2, y2: hw, z: 0, ft: floorTex, wt: wallTex },
+    // Blue approach corridor
     { x1: CELL * 2, y1: -CELL, x2: halfLen - CELL * 3, y2: CELL, z: 0, ft: floorTex2, wt: wallTex2 },
+    // Blue flag room
     { x1: halfLen - CELL * 3, y1: -CELL * 2, x2: halfLen, y2: CELL * 2, z: 0, ft: floorTex, wt: wallTex },
   ];
 
@@ -1148,31 +1157,43 @@ function generateCTF(rng, theme) {
     { x1: -CELL, y1: -CELL, x2: CELL, y2: CELL, z: 128, ft: floorTex, wt: wallTex },
   );
 
-  // Base floor covering entire map
+  // Base floor covering entire map (prevents holes between sections)
   map += `// base floor\n// brush ${brushNum++}\n`;
   map += block(-halfLen, -hw, -128, halfLen, hw, 0, { top: floorTex });
+  // Base ceiling covering entire map
   map += `// base ceiling\n// brush ${brushNum++}\n`;
   map += block(-halfLen, -hw, ROOM_HEIGHT, halfLen, hw, ROOM_HEIGHT + WALL_THICK, { bottom: ceilTex });
 
-  // Generate brushes for raised sections
+  // Generate brushes for each section (raised areas and walls)
   for (const s of sections) {
-    if (s.z <= 0) continue;
+    if (s.z <= 0) continue; // skip ground-level sections, base floor handles them
+    // Raised floor
     map += `// brush ${brushNum++}\n`;
     map += block(s.x1, s.y1, 0, s.x2, s.y2, s.z, { top: s.ft, north: s.wt, south: s.wt, east: s.wt, west: s.wt });
+    // Ceiling
     map += `// brush ${brushNum++}\n`;
     map += block(s.x1, s.y1, s.z + ROOM_HEIGHT, s.x2, s.y2, s.z + ROOM_HEIGHT + WALL_THICK, { bottom: ceilTex });
   }
 
-  // Outer walls
+  // Outer walls — simple perimeter around the full footprint
+  // Find bounding box of all sections
   let minSX = Infinity, minSY = Infinity, maxSX = -Infinity, maxSY = -Infinity;
   for (const s of sections) {
     minSX = Math.min(minSX, s.x1); minSY = Math.min(minSY, s.y1);
     maxSX = Math.max(maxSX, s.x2); maxSY = Math.max(maxSY, s.y2);
   }
-  map += `// brush ${brushNum++}\n`; map += block(minSX, minSY - WALL_THICK, 0, maxSX, minSY, ROOM_HEIGHT, { north: wallTex });
-  map += `// brush ${brushNum++}\n`; map += block(minSX, maxSY, 0, maxSX, maxSY + WALL_THICK, ROOM_HEIGHT, { south: wallTex });
-  map += `// brush ${brushNum++}\n`; map += block(minSX - WALL_THICK, minSY, 0, minSX, maxSY, ROOM_HEIGHT, { east: wallTex });
-  map += `// brush ${brushNum++}\n`; map += block(maxSX, minSY, 0, maxSX + WALL_THICK, maxSY, ROOM_HEIGHT, { west: wallTex });
+  // South wall
+  map += `// brush ${brushNum++}\n`;
+  map += block(minSX, minSY - WALL_THICK, 0, maxSX, minSY, ROOM_HEIGHT, { north: wallTex });
+  // North wall
+  map += `// brush ${brushNum++}\n`;
+  map += block(minSX, maxSY, 0, maxSX, maxSY + WALL_THICK, ROOM_HEIGHT, { south: wallTex });
+  // West wall (red base end)
+  map += `// brush ${brushNum++}\n`;
+  map += block(minSX - WALL_THICK, minSY, 0, minSX, maxSY, ROOM_HEIGHT, { east: wallTex });
+  // East wall (blue base end)
+  map += `// brush ${brushNum++}\n`;
+  map += block(maxSX, minSY, 0, maxSX + WALL_THICK, maxSY, ROOM_HEIGHT, { west: wallTex });
 
   // Jump pad visual brushes (must be in worldspawn)
   const ctfJp1 = jumpPadEntities(9990, -CELL, -CELL, 0, 0, 0, 192, 64);
@@ -1189,7 +1210,7 @@ function generateCTF(rng, theme) {
   map += `// entity ${entNum++}\n{\n"classname" "team_CTF_redflag"\n"origin" "${redFlagX} 0 16"\n}\n`;
   map += `// entity ${entNum++}\n{\n"classname" "team_CTF_blueflag"\n"origin" "${blueFlagX} 0 16"\n}\n`;
 
-  // Red team spawns
+  // Red team spawns — all near red flag (negative X end)
   const redSpawnSpots = [
     [redFlagX + CELL, CELL * 1.5, 0],
     [redFlagX + CELL, -CELL * 1.5, 0],
@@ -1202,10 +1223,11 @@ function generateCTF(rng, theme) {
   ];
   for (const [sx, sy, angle] of redSpawnSpots) {
     map += `// entity ${entNum++}\n{\n"classname" "team_CTF_redspawn"\n"origin" "${sx} ${sy} 32"\n"angle" "${angle}"\n}\n`;
+    // Also add as FFA spawn for fallback
     map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${sx} ${sy} 32"\n"angle" "${angle}"\n}\n`;
   }
 
-  // Blue team spawns
+  // Blue team spawns — all near blue flag (positive X end)
   const blueSpawnSpots = [
     [blueFlagX - CELL, CELL * 1.5, 180],
     [blueFlagX - CELL, -CELL * 1.5, 180],
@@ -1221,7 +1243,7 @@ function generateCTF(rng, theme) {
     map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${sx} ${sy} 32"\n"angle" "${angle}"\n}\n`;
   }
 
-  // Weapons
+  // Weapons in middle and along corridors
   const midWeapons = [...WEAPONS].sort(() => rng() - 0.5).slice(0, 4);
   const positions = [
     [0, hw - CELL, 16], [0, -hw + CELL, 16],
@@ -1248,7 +1270,7 @@ function generateCTF(rng, theme) {
   map += `// entity ${entNum++}\n{\n"classname" "item_armor_combat"\n"origin" "${-CELL * 3} ${-CELL} 16"\n}\n`;
   map += `// entity ${entNum++}\n{\n"classname" "item_armor_combat"\n"origin" "${CELL * 3} ${CELL} 16"\n}\n`;
 
-  // Jump pad trigger entities
+  // Jump pad trigger entities (visuals already in worldspawn above)
   const jp1r = jumpPadEntities(entNum, -CELL, -CELL, 0, 0, 0, 192, 64);
   map += jp1r.map; entNum += jp1r.count;
   const jp2r = jumpPadEntities(entNum, CELL, CELL, 0, 0, 0, 192, 64);
@@ -1262,10 +1284,11 @@ function generateCTF(rng, theme) {
   ];
   for (const [lx, ly] of lightPositions) {
     map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "${lx} ${ly} ${ROOM_HEIGHT - 16}"\n"light" "1000"\n"_color" "1.0 0.95 0.9"\n}\n`;
+    // Second lower light for better floor illumination
     map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "${lx} ${ly} ${ROOM_HEIGHT / 2}"\n"light" "500"\n"_color" "1.0 0.95 0.9"\n}\n`;
   }
 
-  // Kill trigger
+  // Kill trigger below the floor
   map += `// entity ${entNum++} - kill trigger\n{\n"classname" "trigger_hurt"\n"dmg" "1000"\n`;
   map += block(-halfLen - CELL, -hw - CELL, -256, halfLen + CELL, hw + CELL, -130, "common/trigger");
   map += "}\n";
@@ -1278,6 +1301,7 @@ function generateCTF(rng, theme) {
 // =============================================
 
 function generateTourney(rng, theme) {
+  // Small 16x16 grid, tight rooms, lots of vertical, every item matters
   const TG = 16;
   const grid = Array.from({ length: TG }, () => new Array(TG).fill(CELL_SOLID));
   const rooms = [];
@@ -1287,7 +1311,7 @@ function generateTourney(rng, theme) {
   let attempts = 0;
   while (rooms.length < numRooms && attempts < 100) {
     attempts++;
-    const w = 3 + Math.floor(rng() * 3);
+    const w = 3 + Math.floor(rng() * 3); // 3-5
     const h = 3 + Math.floor(rng() * 3);
     const x = 1 + Math.floor(rng() * (TG - w - 2));
     const y = 1 + Math.floor(rng() * (TG - h - 2));
@@ -1323,6 +1347,7 @@ function generateTourney(rng, theme) {
     edges.push([bestFrom, bestTo]);
     mstCount++;
   }
+  // Extra loop
   edges.push([Math.floor(rng() * n), Math.floor(rng() * n)]);
 
   for (const [from, to] of edges) {
@@ -1335,6 +1360,8 @@ function generateTourney(rng, theme) {
     }
   }
 
+  // Use the dungeon renderer but with tourney-specific entity placement
+  // Build map geometry
   let map = "";
   let brushNum = 0;
   const ox = -(TG * CELL) / 2, oy = -(TG * CELL) / 2;
@@ -1362,7 +1389,7 @@ function generateTourney(rng, theme) {
     return roomTextures[bestRi];
   }
 
-  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "q3mapgen tourney"\n`;
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde tourney"\n`;
 
   // Sealing box
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -1402,7 +1429,7 @@ function generateTourney(rng, theme) {
 
   let entNum = 1;
 
-  // Tourney spawns
+  // Tourney spawns — one per room, centered, guaranteed spacing
   for (let i = 0; i < Math.min(4, rooms.length); i++) {
     const room = rooms[i];
     const sx = ox + (room.x + Math.floor(room.w / 2)) * CELL + CELL / 2;
@@ -1420,13 +1447,13 @@ function generateTourney(rng, theme) {
     map += `// entity ${entNum++}\n{\n"classname" "${AMMO_FOR[weps[i]]}"\n"origin" "${wx + 48} ${wy} 16"\n}\n`;
   }
 
-  // Yellow armor
+  // Yellow armor in center-ish room
   const midRoom = rooms[Math.floor(rooms.length / 2)];
   const ax = ox + (midRoom.x + Math.floor(midRoom.w / 2)) * CELL + CELL / 2;
   const ay = oy + (midRoom.y + Math.floor(midRoom.h / 2)) * CELL + CELL / 2;
   map += `// entity ${entNum++}\n{\n"classname" "item_armor_combat"\n"origin" "${ax} ${ay} 16"\n}\n`;
 
-  // Health
+  // Health (4 scattered)
   for (let i = 0; i < 4; i++) {
     const room = rooms[i % rooms.length];
     const hx = ox + (room.x + 1) * CELL + Math.floor(rng() * (room.w - 1)) * CELL / 2;
@@ -1474,7 +1501,7 @@ function generateAtrium(rng, theme) {
   const floorTex = theme.floors[Math.floor(rng() * theme.floors.length)];
   const ceilTex = theme.ceilings[Math.floor(rng() * theme.ceilings.length)];
 
-  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "q3mapgen atrium"\n`;
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde atrium"\n`;
 
   // Sealing box
   const bx1 = -hw - BOX_PAD, by1 = -hh - BOX_PAD;
@@ -1496,18 +1523,23 @@ function generateAtrium(rng, theme) {
 
   // Balconies on all 4 walls at height 192
   const balcZ = 192;
-  const balcD = CELL * 2;
-  const balcGap = CELL * 3;
+  const balcD = CELL * 2; // depth
+  const balcGap = CELL * 3; // gap in middle for jumping across
+  // South balcony (two sections with gap)
   map += `// brush ${brushNum++}\n`; map += block(-hw, -hh, balcZ - 32, -balcGap / 2, -hh + balcD, balcZ, { top: floorTex, south: wallTex2, east: wallTex2, west: wallTex2 });
   map += `// brush ${brushNum++}\n`; map += block(balcGap / 2, -hh, balcZ - 32, hw, -hh + balcD, balcZ, { top: floorTex, south: wallTex2, east: wallTex2, west: wallTex2 });
+  // North balcony
   map += `// brush ${brushNum++}\n`; map += block(-hw, hh - balcD, balcZ - 32, -balcGap / 2, hh, balcZ, { top: floorTex, north: wallTex2, east: wallTex2, west: wallTex2 });
   map += `// brush ${brushNum++}\n`; map += block(balcGap / 2, hh - balcD, balcZ - 32, hw, hh, balcZ, { top: floorTex, north: wallTex2, east: wallTex2, west: wallTex2 });
+  // West balcony
   map += `// brush ${brushNum++}\n`; map += block(-hw, -hh + balcD, balcZ - 32, -hw + balcD, hh - balcD, balcZ, { top: floorTex, east: wallTex2 });
+  // East balcony
   map += `// brush ${brushNum++}\n`; map += block(hw - balcD, -hh + balcD, balcZ - 32, hw, hh - balcD, balcZ, { top: floorTex, west: wallTex2 });
 
-  // Upper corner platforms at height 384
+  // Upper balconies at height 384 (smaller)
   const upZ = 384;
   const upD = CELL;
+  // Corner platforms
   const corners = [[-hw, -hh], [hw - upD * 2, -hh], [-hw, hh - upD * 2], [hw - upD * 2, hh - upD * 2]];
   for (const [cx, cy] of corners) {
     map += `// brush ${brushNum++}\n`;
@@ -1535,7 +1567,7 @@ function generateAtrium(rng, theme) {
 
   let entNum = 1;
 
-  // Spawns
+  // Spawns — ground level and balcony level
   const spawnSpots = [
     [-hw + CELL, -hh + CELL, 32], [hw - CELL, hh - CELL, 32],
     [-hw + CELL, hh - CELL, 32], [hw - CELL, -hh + CELL, 32],
@@ -1549,9 +1581,9 @@ function generateAtrium(rng, theme) {
   // Weapons — spread across levels
   const weps = [...WEAPONS].sort(() => rng() - 0.5);
   const wepSpots = [
-    [0, -hh + CELL, 16], [0, hh - CELL, 16],
-    [-hw + CELL, 0, balcZ + 16], [hw - CELL, 0, balcZ + 16],
-    [0, 0, 96 + 16],
+    [0, -hh + CELL, 16], [0, hh - CELL, 16],        // ground level
+    [-hw + CELL, 0, balcZ + 16], [hw - CELL, 0, balcZ + 16], // balcony level
+    [0, 0, 96 + 16],                                   // on central pillar
   ];
   for (let i = 0; i < Math.min(weps.length, wepSpots.length); i++) {
     const [wx, wy, wz] = wepSpots[i];
@@ -1562,8 +1594,10 @@ function generateAtrium(rng, theme) {
 
   // Quad damage on central pillar top
   map += `// entity ${entNum++}\n{\n"classname" "item_quad"\n"origin" "0 0 ${96 + 16}"\n}\n`;
+
   // Red armor on upper corner platform (risky)
   map += `// entity ${entNum++}\n{\n"classname" "item_armor_body"\n"origin" "${-hw + upD} ${-hh + upD} ${upZ + 16}"\n}\n`;
+
   // Yellow armor on balcony
   map += `// entity ${entNum++}\n{\n"classname" "item_armor_combat"\n"origin" "${hw - CELL} ${0} ${balcZ + 16}"\n}\n`;
 
@@ -1593,14 +1627,16 @@ function generateAtrium(rng, theme) {
   const t2 = teleporterEntities(entNum, hw - upD, hh - upD, upZ, -hw + upD, -hh + upD, upZ, -45);
   map += t2.map; entNum += t2.count;
 
-  // Lights
+  // Lights — multi-level, bright for the big space
   for (let z = ROOM_HEIGHT / 3; z < atriumZ; z += ROOM_HEIGHT / 3) {
     map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "0 0 ${z}"\n"light" "800"\n"_color" "1.0 0.95 0.9"\n}\n`;
   }
+  // Corner lights at ground and balcony level
   for (const [cx, cy] of [[-hw + CELL, -hh + CELL], [hw - CELL, -hh + CELL], [-hw + CELL, hh - CELL], [hw - CELL, hh - CELL]]) {
     map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "${cx} ${cy} ${ROOM_HEIGHT - 16}"\n"light" "500"\n"_color" "0.9 0.85 0.8"\n}\n`;
     map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "${cx} ${cy} ${balcZ + 64}"\n"light" "400"\n"_color" "0.9 0.85 0.8"\n}\n`;
   }
+  // Balcony edge lights
   for (const bx of [-hw + balcD, hw - balcD]) {
     map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "${bx} 0 ${balcZ + 64}"\n"light" "400"\n"_color" "0.8 0.8 1.0"\n}\n`;
   }
@@ -1608,6 +1644,454 @@ function generateAtrium(rng, theme) {
   // Kill trigger
   map += `// entity ${entNum++}\n{\n"classname" "trigger_hurt"\n"dmg" "1000"\n`;
   map += block(bx1, by1, -128 - BOX_PAD - 64, bx2, by2, -128 - BOX_PAD, "common/trigger");
+  map += "}\n";
+
+  return map;
+}
+
+// =============================================
+// CLAN ARENA STYLE (team elimination, symmetric, no items)
+// =============================================
+
+function generateClanArena(rng, theme) {
+  let map = "", brushNum = 0;
+  const arenaW = CELL * 10, arenaH = CELL * 8;
+  const hw = arenaW / 2, hh = arenaH / 2;
+  const wallTex = theme.walls[Math.floor(rng() * theme.walls.length)];
+  const wallTex2 = theme.walls[Math.floor(rng() * theme.walls.length)];
+  const floorTex = theme.floors[Math.floor(rng() * theme.floors.length)];
+  const ceilTex = theme.ceilings[Math.floor(rng() * theme.ceilings.length)];
+
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde clan arena"\n`;
+  map += sealingBox(-hw - BOX_PAD, -hh - BOX_PAD, -128 - BOX_PAD, hw + BOX_PAD, hh + BOX_PAD, ROOM_HEIGHT + BOX_PAD, "common/caulk", 512);
+  brushNum += 6;
+
+  // Floor, ceiling, walls
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh, -64, hw, hh, 0, { top: floorTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh, ROOM_HEIGHT, hw, hh, ROOM_HEIGHT + WALL_THICK, { bottom: ceilTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh - WALL_THICK, 0, hw, -hh, ROOM_HEIGHT, { north: wallTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw, hh, 0, hw, hh + WALL_THICK, ROOM_HEIGHT, { south: wallTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw - WALL_THICK, -hh, 0, -hw, hh, ROOM_HEIGHT, { east: wallTex });
+  map += `// brush ${brushNum++}\n`; map += block(hw, -hh, 0, hw + WALL_THICK, hh, ROOM_HEIGHT, { west: wallTex });
+
+  // Cover pillars scattered across the arena
+  const pillarW = 64, pillarH = 192;
+  const pillarSpots = [
+    [-CELL * 3, -CELL * 2], [-CELL * 3, CELL * 2], [CELL * 3, -CELL * 2], [CELL * 3, CELL * 2],
+    [0, -CELL * 2.5], [0, CELL * 2.5], [-CELL * 1.5, 0], [CELL * 1.5, 0],
+    [-CELL * 4, 0], [CELL * 4, 0],
+  ];
+  for (const [px, py] of pillarSpots) {
+    map += `// brush ${brushNum++}\n`;
+    map += block(px - pillarW / 2, py - pillarW / 2, 0, px + pillarW / 2, py + pillarW / 2, pillarH, wallTex2);
+  }
+
+  // Raised center platform
+  map += `// brush ${brushNum++}\n`;
+  map += block(-CELL, -CELL, 0, CELL, CELL, 64, { top: floorTex, north: wallTex2, south: wallTex2, east: wallTex2, west: wallTex2 });
+
+  map += "}\n";
+  let entNum = 1;
+
+  // Team spawns — spread on opposite ends
+  for (let i = 0; i < 8; i++) {
+    const sx = -hw + CELL + (i % 4) * CELL / 2;
+    const sy = -hh + CELL + Math.floor(i / 4) * (arenaH - CELL * 2);
+    map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${sx} ${sy} 32"\n"angle" "0"\n}\n`;
+  }
+  for (let i = 0; i < 8; i++) {
+    const sx = hw - CELL - (i % 4) * CELL / 2;
+    const sy = -hh + CELL + Math.floor(i / 4) * (arenaH - CELL * 2);
+    map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${sx} ${sy} 32"\n"angle" "180"\n}\n`;
+  }
+
+  // Lights
+  for (let x = -hw + CELL * 2; x <= hw - CELL; x += CELL * 3) {
+    map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "${x} 0 ${ROOM_HEIGHT - 16}"\n"light" "600"\n"_color" "1.0 0.95 0.9"\n}\n`;
+  }
+
+  // Kill trigger
+  map += `// entity ${entNum++}\n{\n"classname" "trigger_hurt"\n"dmg" "1000"\n`;
+  map += block(-hw - BOX_PAD, -hh - BOX_PAD, -200, hw + BOX_PAD, hh + BOX_PAD, -130, "common/trigger");
+  map += "}\n";
+
+  return map;
+}
+
+// =============================================
+// FREEZE TAG STYLE (dense interconnected rooms)
+// =============================================
+
+function generateFreezeTag(rng, theme) {
+  // Dense dungeon — more rooms, wider corridors, max connectivity
+  const FT_GRID = GRID;
+  const grid = Array.from({ length: FT_GRID }, () => new Array(FT_GRID).fill(CELL_SOLID));
+  const rooms = [];
+  const numRooms = 8 + Math.floor(rng() * 3); // 8-10 rooms
+  let attempts = 0;
+
+  while (rooms.length < numRooms && attempts < 300) {
+    attempts++;
+    const w = 3 + Math.floor(rng() * 4);
+    const h = 3 + Math.floor(rng() * 4);
+    const x = 1 + Math.floor(rng() * (FT_GRID - w - 2));
+    const y = 1 + Math.floor(rng() * (FT_GRID - h - 2));
+    let overlap = false;
+    for (const r of rooms) {
+      if (x < r.x + r.w + 1 && x + w + 1 > r.x && y < r.y + r.h + 1 && y + h + 1 > r.y) { overlap = true; break; }
+    }
+    if (overlap) continue;
+    rooms.push({ x, y, w, h });
+    for (let gy = y; gy < y + h; gy++) for (let gx = x; gx < x + w; gx++) grid[gy][gx] = CELL_ROOM;
+  }
+
+  const centers = rooms.map(r => ({ x: Math.floor(r.x + r.w / 2), y: Math.floor(r.y + r.h / 2) }));
+  const n = rooms.length;
+  const inMST = new Array(n).fill(false);
+  const edges = [];
+  inMST[0] = true;
+  let mstCount = 1;
+  while (mstCount < n) {
+    let bestDist = Infinity, bestFrom = -1, bestTo = -1;
+    for (let i = 0; i < n; i++) { if (!inMST[i]) continue; for (let j = 0; j < n; j++) { if (inMST[j]) continue; const dist = Math.abs(centers[i].x - centers[j].x) + Math.abs(centers[i].y - centers[j].y); if (dist < bestDist) { bestDist = dist; bestFrom = i; bestTo = j; } } }
+    if (bestTo === -1) break;
+    inMST[bestTo] = true; edges.push([bestFrom, bestTo]); mstCount++;
+  }
+  // EXTRA connectivity — 4-6 extra edges for maximum interconnection
+  for (let e = 0; e < 4 + Math.floor(rng() * 3); e++) {
+    const i = Math.floor(rng() * n), j = Math.floor(rng() * n);
+    if (i !== j) edges.push([i, j]);
+  }
+
+  // Carve 3-cell-wide corridors
+  for (const [from, to] of edges) {
+    const a = centers[from], b = centers[to];
+    if (rng() < 0.5) {
+      for (let gx = Math.min(a.x, b.x); gx <= Math.max(a.x, b.x); gx++) {
+        for (let dy = -1; dy <= 1; dy++) { const gy = a.y + dy; if (gy >= 0 && gy < FT_GRID && grid[gy][gx] === CELL_SOLID) grid[gy][gx] = CELL_CORRIDOR; }
+      }
+      for (let gy = Math.min(a.y, b.y); gy <= Math.max(a.y, b.y); gy++) {
+        for (let dx = -1; dx <= 1; dx++) { const gx = b.x + dx; if (gx >= 0 && gx < FT_GRID && grid[gy][gx] === CELL_SOLID) grid[gy][gx] = CELL_CORRIDOR; }
+      }
+    } else {
+      for (let gy = Math.min(a.y, b.y); gy <= Math.max(a.y, b.y); gy++) {
+        for (let dx = -1; dx <= 1; dx++) { const gx = a.x + dx; if (gx >= 0 && gx < FT_GRID && grid[gy][gx] === CELL_SOLID) grid[gy][gx] = CELL_CORRIDOR; }
+      }
+      for (let gx = Math.min(a.x, b.x); gx <= Math.max(a.x, b.x); gx++) {
+        for (let dy = -1; dy <= 1; dy++) { const gy = b.y + dy; if (gy >= 0 && gy < FT_GRID && grid[gy][gx] === CELL_SOLID) grid[gy][gx] = CELL_CORRIDOR; }
+      }
+    }
+  }
+
+  // Use the dungeon renderer
+  return dungeonToMap(grid, rooms, centers, theme, rng);
+}
+
+// =============================================
+// INSTAGIB/RAIL STYLE (open floor with cover pillars)
+// =============================================
+
+function generateInstagib(rng, theme) {
+  let map = "", brushNum = 0;
+  const arenaW = CELL * 12, arenaH = CELL * 12;
+  const hw = arenaW / 2, hh = arenaH / 2;
+  const ceilH = 384;
+  const wallTex = theme.walls[Math.floor(rng() * theme.walls.length)];
+  const wallTex2 = theme.walls[Math.floor(rng() * theme.walls.length)];
+  const floorTex = theme.floors[Math.floor(rng() * theme.floors.length)];
+  const ceilTex = theme.ceilings[Math.floor(rng() * theme.ceilings.length)];
+
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde instagib"\n`;
+  map += sealingBox(-hw - BOX_PAD, -hh - BOX_PAD, -128 - BOX_PAD, hw + BOX_PAD, hh + BOX_PAD, ceilH + BOX_PAD, "common/caulk", 512);
+  brushNum += 6;
+
+  // Floor + ceiling + walls
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh, -64, hw, hh, 0, { top: floorTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh, ceilH, hw, hh, ceilH + WALL_THICK, { bottom: ceilTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh - WALL_THICK, 0, hw, -hh, ceilH, { north: wallTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw, hh, 0, hw, hh + WALL_THICK, ceilH, { south: wallTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw - WALL_THICK, -hh, 0, -hw, hh, ceilH, { east: wallTex });
+  map += `// brush ${brushNum++}\n`; map += block(hw, -hh, 0, hw + WALL_THICK, hh, ceilH, { west: wallTex });
+
+  // Tall cover pillars/walls — scattered for dodging
+  const coverW = 48 + Math.floor(rng() * 48); // 48-96 wide
+  const numPillars = 15 + Math.floor(rng() * 8);
+  for (let i = 0; i < numPillars; i++) {
+    const px = Math.round((-hw + CELL + rng() * (arenaW - CELL * 2)) / 32) * 32;
+    const py = Math.round((-hh + CELL + rng() * (arenaH - CELL * 2)) / 32) * 32;
+    const pw = 48 + Math.floor(rng() * 64);
+    const ph = 48 + Math.floor(rng() * 64);
+    const pHeight = 128 + Math.floor(rng() * 192); // 128-320 tall
+    const tex = rng() < 0.5 ? wallTex : wallTex2;
+    map += `// brush ${brushNum++}\n`;
+    map += block(px - pw / 2, py - ph / 2, 0, px + pw / 2, py + ph / 2, pHeight, tex);
+  }
+
+  // Some L-shaped walls for more interesting cover
+  for (let i = 0; i < 4; i++) {
+    const lx = Math.round((-hw + CELL * 2 + rng() * (arenaW - CELL * 4)) / 64) * 64;
+    const ly = Math.round((-hh + CELL * 2 + rng() * (arenaH - CELL * 4)) / 64) * 64;
+    const lh = 192 + Math.floor(rng() * 128);
+    map += `// brush ${brushNum++}\n`; map += block(lx, ly, 0, lx + CELL, ly + WALL_THICK * 2, lh, wallTex2);
+    map += `// brush ${brushNum++}\n`; map += block(lx, ly, 0, lx + WALL_THICK * 2, ly + CELL / 2, lh, wallTex2);
+  }
+
+  map += "}\n";
+  let entNum = 1;
+
+  // Lots of spawns spread around (no weapons in instagib)
+  for (let i = 0; i < 16; i++) {
+    const sx = Math.round((-hw + CELL + rng() * (arenaW - CELL * 2)) / 64) * 64;
+    const sy = Math.round((-hh + CELL + rng() * (arenaH - CELL * 2)) / 64) * 64;
+    map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${sx} ${sy} 32"\n"angle" "${Math.floor(rng() * 360)}"\n}\n`;
+  }
+
+  // Grid of lights
+  for (let x = -hw + CELL * 2; x < hw; x += CELL * 3) {
+    for (let y = -hh + CELL * 2; y < hh; y += CELL * 4) {
+      map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "${x} ${y} ${ceilH - 16}"\n"light" "500"\n"_color" "1.0 0.95 0.9"\n}\n`;
+    }
+  }
+
+  map += `// entity ${entNum++}\n{\n"classname" "trigger_hurt"\n"dmg" "1000"\n`;
+  map += block(-hw - BOX_PAD, -hh - BOX_PAD, -200, hw + BOX_PAD, hh + BOX_PAD, -130, "common/trigger");
+  map += "}\n";
+
+  return map;
+}
+
+// =============================================
+// DEFRAG STYLE (linear movement challenge course)
+// =============================================
+
+function generateDefrag(rng, theme) {
+  let map = "", brushNum = 0;
+  const courseLen = CELL * 20;
+  const courseW = CELL * 4;
+  const hw = courseW / 2;
+  const wallTex = theme.walls[Math.floor(rng() * theme.walls.length)];
+  const floorTex = theme.floors[Math.floor(rng() * theme.floors.length)];
+
+  // Pre-calculate the course to know full length for sky box
+  let preX = CELL * 4, preZ = 0;
+  const rngCopy = mulberry32(Math.floor(rng() * 4294967296)); // fork rng
+  for (let i = 0; i < 12; i++) {
+    const pw = Math.max(CELL, CELL * 3 - i * CELL / 4);
+    const gap = CELL + i * CELL / 4;
+    preX += pw + gap;
+  }
+  const totalLen = preX + CELL * 4;
+
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde defrag"\n`;
+
+  // Sky box — covers entire course
+  const skyPad = CELL * 3;
+  map += sealingBox(-skyPad, -hw - skyPad, -CELL * 4, totalLen + skyPad, hw + skyPad, ROOM_HEIGHT + skyPad, theme.sky, 512);
+  brushNum += 6;
+
+  // Start platform (large, safe)
+  map += `// brush ${brushNum++}\n`;
+  map += block(0, -hw, -32, CELL * 3, hw, 0, { top: floorTex, north: wallTex, south: wallTex, east: wallTex, west: wallTex });
+
+  // Series of platforms — getting smaller and further apart
+  let curX = CELL * 4;
+  let curZ = 0;
+  const platPositions = [];
+  for (let i = 0; i < 12; i++) {
+    const platW = Math.max(CELL, CELL * 3 - i * CELL / 4); // shrinks
+    const platD = Math.max(CELL, CELL * 2 - i * CELL / 6);
+    const gap = CELL + i * CELL / 4; // grows
+    const dz = Math.floor(rng() * 3 - 1) * 64; // -64, 0, or +64 height change
+
+    curZ = Math.max(-128, Math.min(256, curZ + dz));
+    map += `// brush ${brushNum++}\n`;
+    map += block(curX, -platD / 2, curZ - 32, curX + platW, platD / 2, curZ, { top: floorTex, north: wallTex, south: wallTex, east: wallTex, west: wallTex });
+    platPositions.push({ x: curX + platW / 2, y: 0, z: curZ, w: platW });
+    curX += platW + gap;
+  }
+
+  // Finish platform (large)
+  map += `// brush ${brushNum++}\n`;
+  map += block(curX, -hw, curZ - 32, curX + CELL * 3, hw, curZ, { top: floorTex, north: wallTex, south: wallTex, east: wallTex, west: wallTex });
+
+  // Jump pad visuals at key points (every 3rd platform)
+  for (let i = 2; i < platPositions.length; i += 3) {
+    const p = platPositions[i];
+    const nextP = platPositions[Math.min(i + 2, platPositions.length - 1)];
+    map += `// jump pad pedestal\n// brush ${brushNum++}\n`;
+    map += block(p.x - 32, -32, p.z - 32, p.x + 32, 32, p.z, {
+      top: "base_floor/diamond2c", north: "base_trim/border11light", south: "base_trim/border11light",
+      east: "base_trim/border11light", west: "base_trim/border11light",
+    });
+  }
+
+  map += "}\n";
+  let entNum = 1;
+
+  // Jump pads at key points
+  for (let i = 2; i < platPositions.length; i += 3) {
+    const p = platPositions[i];
+    const nextP = platPositions[Math.min(i + 2, platPositions.length - 1)];
+    const targetName = `dfpad_${entNum}`;
+    map += `// entity ${entNum} - defrag jump pad\n{\n"classname" "trigger_push"\n"target" "${targetName}"\n`;
+    map += block(p.x - 32, -32, p.z, p.x + 32, 32, p.z + 16, "common/trigger");
+    map += "}\n"; entNum++;
+    map += `// entity ${entNum++}\n{\n"classname" "target_position"\n"targetname" "${targetName}"\n"origin" "${nextP.x} 0 ${nextP.z + 128}"\n}\n`;
+  }
+
+  // Start spawn
+  map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${CELL} 0 32"\n"angle" "0"\n}\n`;
+  map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${CELL * 2} ${CELL / 2} 32"\n"angle" "0"\n}\n`;
+  map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${CELL * 2} ${-CELL / 2} 32"\n"angle" "0"\n}\n`;
+  map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${CELL} ${CELL / 2} 32"\n"angle" "0"\n}\n`;
+
+  // Lights along the course
+  for (let x = 0; x < curX; x += CELL * 3) {
+    map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "${x} 0 ${ROOM_HEIGHT - 16}"\n"light" "400"\n"_color" "1.0 0.95 0.9"\n}\n`;
+  }
+
+  // Kill trigger in the void (inside sky box bounds)
+  map += `// entity ${entNum++}\n{\n"classname" "trigger_hurt"\n"dmg" "1000"\n`;
+  map += block(-skyPad + 64, -hw - skyPad + 64, -CELL * 4 + 64, totalLen + skyPad - 64, hw + skyPad - 64, -CELL * 3, "common/trigger");
+  map += "}\n";
+
+  return map;
+}
+
+// =============================================
+// CPMA STYLE (tall multi-level atrium for air control)
+// =============================================
+
+function generateCPMA(rng, theme) {
+  let map = "", brushNum = 0;
+  const aW = CELL * 10, aH = CELL * 10;
+  const hw = aW / 2, hh = aH / 2;
+  const ceilH = 640; // extra tall for air control
+  const wallTex = theme.walls[Math.floor(rng() * theme.walls.length)];
+  const wallTex2 = theme.walls[Math.floor(rng() * theme.walls.length)];
+  const floorTex = theme.floors[Math.floor(rng() * theme.floors.length)];
+  const ceilTex = theme.ceilings[Math.floor(rng() * theme.ceilings.length)];
+
+  map += `// entity 0\n{\n"classname" "worldspawn"\n"message" "tilde cpma"\n`;
+  map += sealingBox(-hw - BOX_PAD, -hh - BOX_PAD, -128 - BOX_PAD, hw + BOX_PAD, hh + BOX_PAD, ceilH + BOX_PAD, "common/caulk", 512);
+  brushNum += 6;
+
+  // Ground floor
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh, -64, hw, hh, 0, { top: floorTex });
+  // Very high ceiling
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh, ceilH, hw, hh, ceilH + WALL_THICK, { bottom: ceilTex });
+  // Walls
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh - WALL_THICK, 0, hw, -hh, ceilH, { north: wallTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw, hh, 0, hw, hh + WALL_THICK, ceilH, { south: wallTex });
+  map += `// brush ${brushNum++}\n`; map += block(-hw - WALL_THICK, -hh, 0, -hw, hh, ceilH, { east: wallTex });
+  map += `// brush ${brushNum++}\n`; map += block(hw, -hh, 0, hw + WALL_THICK, hh, ceilH, { west: wallTex });
+
+  // Level 1 platforms (z=160) — ring around edges
+  const L1 = 160, L1D = CELL * 2;
+  map += `// brush ${brushNum++}\n`; map += block(-hw, -hh, L1 - 32, -hw + L1D, hh, L1, { top: floorTex, east: wallTex2 });
+  map += `// brush ${brushNum++}\n`; map += block(hw - L1D, -hh, L1 - 32, hw, hh, L1, { top: floorTex, west: wallTex2 });
+  map += `// brush ${brushNum++}\n`; map += block(-hw + L1D, -hh, L1 - 32, hw - L1D, -hh + L1D, L1, { top: floorTex, south: wallTex2 });
+  map += `// brush ${brushNum++}\n`; map += block(-hw + L1D, hh - L1D, L1 - 32, hw - L1D, hh, L1, { top: floorTex, north: wallTex2 });
+
+  // Level 2 platforms (z=320) — corner platforms
+  const L2 = 320, L2S = CELL * 3;
+  const l2Corners = [[-hw, -hh], [hw - L2S, -hh], [-hw, hh - L2S], [hw - L2S, hh - L2S]];
+  for (const [cx, cy] of l2Corners) {
+    map += `// brush ${brushNum++}\n`;
+    map += block(cx, cy, L2 - 32, cx + L2S, cy + L2S, L2, { top: floorTex, north: wallTex, south: wallTex, east: wallTex, west: wallTex });
+  }
+
+  // Level 3 — center platform (z=480)
+  const L3 = 480, L3S = CELL * 2;
+  map += `// brush ${brushNum++}\n`;
+  map += block(-L3S / 2, -L3S / 2, L3 - 32, L3S / 2, L3S / 2, L3, { top: floorTex, north: wallTex2, south: wallTex2, east: wallTex2, west: wallTex2 });
+
+  // Central pillar connecting levels (visual landmark)
+  map += `// brush ${brushNum++}\n`;
+  map += block(-32, -32, 0, 32, 32, L1, wallTex2);
+
+  // Jump pad visuals
+  const jpSpots = [
+    [-hw + CELL, -hh + CELL], [hw - CELL, -hh + CELL],
+    [-hw + CELL, hh - CELL], [hw - CELL, hh - CELL],
+    [-CELL, 0], [CELL, 0],
+  ];
+  for (const [jx, jy] of jpSpots) {
+    map += `// brush ${brushNum++}\n`;
+    map += block(jx - 32, jy - 32, 0, jx + 32, jy + 32, 8, { top: "base_floor/diamond2c", north: "base_trim/border11light", south: "base_trim/border11light", east: "base_trim/border11light", west: "base_trim/border11light" });
+  }
+
+  map += "}\n";
+  let entNum = 1;
+
+  // Jump pads: ground → L1, L1 → L2, L2 → L3
+  const jpPairs = [
+    [[-hw + CELL, -hh + CELL, 0], [-hw + L1D / 2, -hh + L1D / 2, L1 + 64]],
+    [[hw - CELL, -hh + CELL, 0], [hw - L1D / 2, -hh + L1D / 2, L1 + 64]],
+    [[-hw + CELL, hh - CELL, 0], [-hw + L2S / 2, hh - L2S / 2, L2 + 64]],
+    [[hw - CELL, hh - CELL, 0], [hw - L2S / 2, hh - L2S / 2, L2 + 64]],
+    [[-CELL, 0, L1], [0, 0, L3 + 64]],
+    [[CELL, 0, L1], [0, 0, L3 + 64]],
+  ];
+  for (const [src, dst] of jpPairs) {
+    const tn = `cpma_jp_${entNum}`;
+    map += `// entity ${entNum}\n{\n"classname" "trigger_push"\n"target" "${tn}"\n`;
+    map += block(src[0] - 32, src[1] - 32, src[2], src[0] + 32, src[1] + 32, src[2] + 16, "common/trigger");
+    map += "}\n"; entNum++;
+    map += `// entity ${entNum++}\n{\n"classname" "target_position"\n"targetname" "${tn}"\n"origin" "${dst.join(" ")}"\n}\n`;
+  }
+
+  // Spawns across all levels
+  const spawnSpots = [
+    [-hw + CELL, -hh + CELL, 32], [hw - CELL, hh - CELL, 32],
+    [-hw + CELL, hh - CELL, 32], [hw - CELL, -hh + CELL, 32],
+    [-hw + CELL, 0, L1 + 32], [hw - CELL, 0, L1 + 32],
+    [0, -hh + CELL, L1 + 32], [0, hh - CELL, L1 + 32],
+    [-hw + CELL, -hh + CELL, L2 + 32], [hw - CELL, hh - CELL, L2 + 32],
+    [0, 0, L3 + 32], [CELL, CELL, 32],
+  ];
+  for (const [sx, sy, sz] of spawnSpots) {
+    map += `// entity ${entNum++}\n{\n"classname" "info_player_deathmatch"\n"origin" "${sx} ${sy} ${sz}"\n"angle" "${Math.floor(rng() * 360)}"\n}\n`;
+  }
+
+  // All weapons spread across levels
+  const wepSpots = [
+    [0, -hh + CELL, 16, "weapon_rocketlauncher"],
+    [0, hh - CELL, 16, "weapon_lightning"],
+    [-hw + CELL, 0, L1 + 16, "weapon_railgun"],
+    [hw - CELL, 0, L1 + 16, "weapon_plasmagun"],
+    [0, 0, L3 + 16, "weapon_shotgun"],
+  ];
+  for (const [wx, wy, wz, wep] of wepSpots) {
+    map += `// entity ${entNum++}\n{\n"classname" "${wep}"\n"origin" "${wx} ${wy} ${wz}"\n}\n`;
+    const ammo = AMMO_FOR[wep];
+    if (ammo) map += `// entity ${entNum++}\n{\n"classname" "${ammo}"\n"origin" "${wx + 48} ${wy} ${wz}"\n}\n`;
+  }
+
+  // Quad on top level
+  map += `// entity ${entNum++}\n{\n"classname" "item_quad"\n"origin" "0 0 ${L3 + 16}"\n}\n`;
+  // Red armor on L2
+  map += `// entity ${entNum++}\n{\n"classname" "item_armor_body"\n"origin" "${-hw + CELL * 2} ${-hh + CELL * 2} ${L2 + 16}"\n}\n`;
+  // Yellow armor on L1
+  map += `// entity ${entNum++}\n{\n"classname" "item_armor_combat"\n"origin" "${hw - CELL * 2} ${0} ${L1 + 16}"\n}\n`;
+  // Health scattered
+  for (let i = 0; i < 8; i++) {
+    const hx = Math.floor(rng() * aW) - hw;
+    const hy = Math.floor(rng() * aH) - hh;
+    map += `// entity ${entNum++}\n{\n"classname" "item_health"\n"origin" "${hx} ${hy} 16"\n}\n`;
+  }
+
+  // Lights per level
+  for (const z of [ROOM_HEIGHT / 2, L1 + 96, L2 + 96, L3 + 96, ceilH - 16]) {
+    map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "0 0 ${z}"\n"light" "600"\n"_color" "1.0 0.95 0.9"\n}\n`;
+  }
+  for (const [cx, cy] of [[-hw + CELL, -hh + CELL], [hw - CELL, -hh + CELL], [-hw + CELL, hh - CELL], [hw - CELL, hh - CELL]]) {
+    map += `// entity ${entNum++}\n{\n"classname" "light"\n"origin" "${cx} ${cy} ${ROOM_HEIGHT}"\n"light" "400"\n"_color" "0.9 0.85 0.8"\n}\n`;
+  }
+
+  // Kill trigger
+  map += `// entity ${entNum++}\n{\n"classname" "trigger_hurt"\n"dmg" "1000"\n`;
+  map += block(-hw - BOX_PAD, -hh - BOX_PAD, -200, hw + BOX_PAD, hh + BOX_PAD, -130, "common/trigger");
   map += "}\n";
 
   return map;
@@ -1633,7 +2117,7 @@ function generateArenaFile(mapNames, styles) {
   for (let i = 0; i < mapNames.length; i++) {
     const name = mapNames[i];
     const type = (styles && styles[i] === "ctf") ? "ctf" : "ffa";
-    content += `{\nmap "${name}"\nlongname "q3mapgen - ${name}"\ntype "${type}"\nbots "Sarge"\n}\n`;
+    content += `{\nmap "${name}"\nlongname "tilde - ${name}"\ntype "${type}"\nbots "Sarge"\n}\n`;
   }
   return content;
 }
@@ -1655,11 +2139,11 @@ function main() {
   }
 
   // Default seeds
-  const defaultSeeds = [42, 137, 256, 999, 777, 555, 888, 333];
+  const defaultSeeds = [42, 137, 256, 999, 777, 555, 888, 333, 111, 222, 444, 666, 1337];
   while (seeds.length < mapCount) seeds.push(defaultSeeds[seeds.length] || Math.floor(Math.random() * 10000));
 
   // Cycle through all styles
-  const allStyles = ["dungeon", "platform", "vertical", "platform", "ctf", "tourney", "atrium", "platform"];
+  const allStyles = ["dungeon", "platform", "vertical", "ctf", "tourney", "atrium", "clan_arena", "freezetag", "instagib", "defrag", "cpma", "platform", "platform"];
   const mapNames = [];
   const styles = [];
   for (let i = 0; i < mapCount; i++) {
@@ -1669,6 +2153,7 @@ function main() {
 
   // Adjust for complexity
   if (complexity === "simple") {
+    // Override: fewer styles
     for (let i = 0; i < mapCount; i++) styles[i] = ["dungeon", "platform"][i % 2];
   }
 
@@ -1704,6 +2189,23 @@ function main() {
     } else if (style === "atrium") {
       console.log(`Arena ${i + 1} (seed=${seeds[i]}, theme=${theme.name}, style=atrium)`);
       mapContent = generateAtrium(rng, theme);
+    } else if (style === "clan_arena") {
+      console.log(`Arena ${i + 1} (seed=${seeds[i]}, theme=${theme.name}, style=clan_arena)`);
+      mapContent = generateClanArena(rng, theme);
+    } else if (style === "freezetag") {
+      console.log(`Arena ${i + 1} (seed=${seeds[i]}, theme=${theme.name}, style=freezetag)`);
+      const { grid, rooms, centers } = generateDungeon(rng);
+      printGrid(grid);
+      mapContent = generateFreezeTag(rng, theme);
+    } else if (style === "instagib") {
+      console.log(`Arena ${i + 1} (seed=${seeds[i]}, theme=${theme.name}, style=instagib)`);
+      mapContent = generateInstagib(rng, theme);
+    } else if (style === "defrag") {
+      console.log(`Arena ${i + 1} (seed=${seeds[i]}, theme=${theme.name}, style=defrag)`);
+      mapContent = generateDefrag(rng, theme);
+    } else if (style === "cpma") {
+      console.log(`Arena ${i + 1} (seed=${seeds[i]}, theme=${theme.name}, style=cpma)`);
+      mapContent = generateCPMA(rng, theme);
     } else {
       const platforms = generatePlatforms(rng);
       console.log(`Arena ${i + 1} (seed=${seeds[i]}, theme=${theme.name}, style=platform): ${platforms.length} platforms`);
@@ -1724,7 +2226,7 @@ function main() {
   console.log(`Wrote ${arenaPath}`);
 
   console.log(`\nArena generation complete! (${mapCount} maps)`);
-  console.log("Next: npm run compile");
+  console.log("Next: npm run compile:arena");
 }
 
 main();

@@ -6,7 +6,7 @@ This is the map generator behind [sp00.nz](https://sp00.nz) — click the **tild
 
 ## What it makes
 
-Seven distinct map styles, all from the same generator:
+Twelve distinct map styles, all from the same generator — including support for popular Q3 community mods:
 
 ### Dungeon
 Flat enclosed corridor-based rooms. The generator places 5-8 rooms on a 32x32 grid, then connects them with Prim's minimum spanning tree plus a few extra edges for loops. L-shaped corridors, per-room texture variety, and enough health packs to keep things moving. Classic deathmatch in a procedural dungeon crawl.
@@ -28,8 +28,23 @@ Small, tight 1v1 maps. Only 3-4 rooms on a compact 16x16 grid. Deliberate weapon
 ### Atrium
 One massive central room with three levels of action. Ground floor, balconies at height 192 (with gaps for jumping across), and corner platforms at height 384. A central pillar/platform at ground level holds the quad damage. Jump pads in all four corners launch you from ground to balcony level. Teleporters connect opposite upper corner platforms. Red armor sits on one of the upper platforms — exposed and risky, just like it should be. Five weapons spread across all three levels so you're constantly moving up and down.
 
-### Platform (again)
-The style rotation is `dungeon, platform, vertical, platform, ctf, tourney, atrium, platform` — platform appears three times because floating-in-the-void maps are endlessly replayable and every seed makes a completely different layout.
+### Clan Arena
+Built for CA/CPMA team elimination. Wide open arena with scattered cover pillars and L-shaped walls for dodging. Raised center platform. No weapon or item pickups — CA starts you fully loaded. 16 spawns split across two sides for team play. All about aim, movement, and working those cover angles.
+
+### Freeze Tag
+Dense interconnected dungeon optimized for freeze tag. 8-10 rooms connected by **3-cell-wide corridors** with maximum connectivity — 4-6 extra MST edges on top of the base spanning tree. When your teammate is frozen, you need to reach them fast. Multiple entrances to every room. Lots of health pickups because you're going to need them.
+
+### Instagib / Rail Arena
+Wide open floor with tall cover pillars and L-shaped walls scattered across a 12x12 cell arena. Long sightlines for railgun duels, but enough cover to dodge behind. Pillars vary from 128 to 320 units tall. No weapons or items — this is railgun-only territory. 16 spawns spread across the arena on a grid. Pure aim.
+
+### DeFRaG
+Linear movement challenge course in a killsky void. Start on a large platform, then navigate through 12 progressively harder obstacles — platforms that shrink, gaps that widen, height changes that test your timing. Jump pads every 3 platforms launch you forward. Finish platform at the end. Inspired by DeFRaG movement maps. Only 4 spawns at the start — this is a personal challenge, not a deathmatch.
+
+### CPMA
+Tall multi-level atrium built for Challenge ProMode physics. 640-unit ceiling for maximum air control. Three stacked platform levels (160, 320, 480) connected by 6 jump pads. Ring balconies at level 1, corner platforms at level 2, center platform at level 3. All 5 weapons spread across heights. Quad on top, red armor on L2, yellow on L1. The kind of map where knowing the jump pad routes is half the battle.
+
+### Platform (repeats)
+The full style rotation is `dungeon, platform, vertical, ctf, tourney, atrium, clan_arena, freezetag, instagib, defrag, cpma, platform, platform`. Platform appears multiple times because floating-in-the-void maps are endlessly replayable and every seed makes a completely different layout.
 
 ## Gameplay features
 
