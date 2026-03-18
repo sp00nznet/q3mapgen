@@ -1,0 +1,8 @@
+node_modules/
+assets/
+compile/
+dist/
+*.bsp
+*.aas
+*.srf
+*.prt

@@ -1,0 +1,20 @@
+{
+  "name": "q3mapgen",
+  "version": "1.0.0",
+  "description": "Procedural map generator for Quake III Arena. Dungeons, multi-level arenas, and q3dm17-style floating platforms.",
+  "author": "sp00nz",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sp00nznet/q3mapgen.git"
+  },
+  "scripts": {
+    "generate": "node src/generate-arena.js",
+    "compile": "node src/compile-arenas.js",
+    "package": "node src/package-pk3.js",
+    "build": "npm run generate && npm run compile && npm run package"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1"
+  }
+}
