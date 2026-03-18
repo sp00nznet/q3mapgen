@@ -1,7 +1,7 @@
 {
   "name": "q3mapgen",
-  "version": "1.0.0",
-  "description": "Procedural map generator for Quake III Arena. Dungeons, multi-level arenas, and q3dm17-style floating platforms.",
+  "version": "2.0.0",
+  "description": "Procedural map generator for Quake III Arena. Dungeons, floating platforms, CTF, tourney, atriums, and more — all from a seed number.",
   "author": "sp00nz",
   "license": "MIT",
   "repository": {

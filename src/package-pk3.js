@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// q3mapgen - Packages compiled arena BSPs + arena file into a pk3 (ZIP with Q3 directory structure)
+// q3mapgen - Packages compiled arena BSPs + AAS + arena file into a pk3 (ZIP with Q3 directory structure)
 //
 // https://github.com/sp00nznet/q3mapgen
 
@@ -19,9 +19,23 @@ const OUTPUT = process.env.OUTPUT_DIR
   ? path.join(process.env.OUTPUT_DIR, "arenas.pk3")
   : path.join(__dirname, "..", "dist", "arenas.pk3");
 
-const ARENA_MAPS = ["arena1", "arena2", "arena3", "arena4", "arena5"];
+// Auto-detect arena maps from compile directory
+const ARENA_MAPS = fs.existsSync(COMPILE_DIR)
+  ? fs.readdirSync(COMPILE_DIR)
+      .filter(f => f.startsWith("arena") && f.endsWith(".bsp"))
+      .map(f => f.replace(".bsp", ""))
+      .sort()
+  : [];
 
 function main() {
+  if (ARENA_MAPS.length === 0) {
+    console.error("No compiled arena*.bsp files found in " + COMPILE_DIR);
+    console.error("Run 'npm run compile' first.");
+    process.exit(1);
+  }
+
+  console.log(`Found ${ARENA_MAPS.length} maps to package: ${ARENA_MAPS.join(", ")}`);
+
   const distDir = path.dirname(OUTPUT);
   fs.mkdirSync(distDir, { recursive: true });
 

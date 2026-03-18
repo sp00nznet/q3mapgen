@@ -17,7 +17,13 @@ const COMPILE_DIR = process.env.OUTPUT_DIR
   ? path.join(process.env.OUTPUT_DIR, "maps")
   : path.join(__dirname, "..", "compile", "baseq3", "maps");
 
-const ARENA_MAPS = ["arena1", "arena2", "arena3", "arena4", "arena5"];
+// Auto-detect arena maps from assets directory
+const ARENA_MAPS = fs.existsSync(MAPS_DIR)
+  ? fs.readdirSync(MAPS_DIR)
+      .filter(f => f.startsWith("arena") && f.endsWith(".map"))
+      .map(f => f.replace(".map", ""))
+      .sort()
+  : [];
 
 function run(cmd) {
   console.log(`  > ${cmd}`);
@@ -30,6 +36,12 @@ function run(cmd) {
 }
 
 function main() {
+  if (ARENA_MAPS.length === 0) {
+    console.error("No arena*.map files found in " + MAPS_DIR);
+    console.error("Run 'npm run generate' first.");
+    process.exit(1);
+  }
+
   // Check that q3map2 is available
   try {
     execSync(`"${Q3MAP2}" -help`, { stdio: "pipe" });
@@ -46,6 +58,8 @@ function main() {
       process.exit(1);
     }
   }
+
+  console.log(`Found ${ARENA_MAPS.length} maps to compile: ${ARENA_MAPS.join(", ")}`);
 
   fs.mkdirSync(COMPILE_DIR, { recursive: true });
 
